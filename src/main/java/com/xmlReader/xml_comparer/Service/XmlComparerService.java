@@ -25,20 +25,13 @@ public class XmlComparerService {
             List<Map<String, String>> dataAC = extractValues(doc1.getDocumentElement());
             List<Map<String, String>> dataBC = extractValues(doc2.getDocumentElement());
 
-            List<Map<String, String>> onlyInAC = new ArrayList<>(dataAC);
-            onlyInAC.removeAll(dataBC);
-
-            List<Map<String, String>> onlyInBC = new ArrayList<>(dataBC);
-            onlyInBC.removeAll(dataAC);
-
-            List<Map<String, String>> commonData = new ArrayList<>(dataAC);
-            commonData.retainAll(dataBC);
+            System.out.println("Data AC: " + dataAC);
+            System.out.println("Data BC: " + dataBC);
 
             Workbook workbook = new XSSFWorkbook();
-
-            createSheet(workbook, "Only in BC", onlyInBC);
-            createSheet(workbook, "Only in AC", onlyInAC);
-            createDifferenceSheet(workbook, "Difference between BC and AC", commonData, dataAC, dataBC);
+            createSheet(workbook, "Only in BC", findOnlyInFirstList(dataBC, dataAC));
+            createSheet(workbook, "Only in AC", findOnlyInFirstList(dataAC, dataBC));
+            createDifferenceSheet(workbook, "Difference between BC and AC", dataBC, dataAC);
 
             try (FileOutputStream fileOut = new FileOutputStream(outputPath)) {
                 workbook.write(fileOut);
@@ -104,68 +97,118 @@ public class XmlComparerService {
         if (nodeList.getLength() > 0) {
             Node node = nodeList.item(0);
             if (node != null) {
-                return node.getTextContent();
+                return node.getTextContent().trim();
             }
         }
         return "";
     }
 
+    private List<Map<String, String>> findOnlyInFirstList(List<Map<String, String>> list1, List<Map<String, String>> list2) {
+        List<Map<String, String>> onlyInFirstList = new ArrayList<>();
+        for (Map<String, String> map1 : list1) {
+            boolean matchFound = false;
+            for (Map<String, String> map2 : list2) {
+                if (map1.equals(map2)) {
+                    matchFound = true;
+                    break;
+                }
+            }
+            if (!matchFound) {
+                onlyInFirstList.add(map1);
+            }
+        }
+        return onlyInFirstList;
+    }
+
     private void createSheet(Workbook workbook, String sheetName, List<Map<String, String>> data) {
         Sheet sheet = workbook.createSheet(sheetName);
         int rowNum = 0;
-        Row headerRow = sheet.createRow(rowNum++);
-        String[] headers = { "issuerName", "curveId", "ccy", "running", "unit", "curvePath", "issuerType", "tenor", "spread", "vol", "origSprd", "fee" };
-        for (int i = 0; i < headers.length; i++) {
-            headerRow.createCell(i).setCellValue(headers[i]);
-        }
-
-        for (Map<String, String> rowMap : data) {
-            Row row = sheet.createRow(rowNum++);
+        if (!data.isEmpty()) {
+            Row headerRow = sheet.createRow(rowNum++);
+            Set<String> headers = data.get(0).keySet();
             int cellNum = 0;
             for (String header : headers) {
-                Cell cell = row.createCell(cellNum++);
-                cell.setCellValue(rowMap.getOrDefault(header, ""));
+                headerRow.createCell(cellNum++).setCellValue(header);
             }
+
+            for (Map<String, String> rowMap : data) {
+                Row row = sheet.createRow(rowNum++);
+                cellNum = 0;
+                for (String header : headers) {
+                    Cell cell = row.createCell(cellNum++);
+                    cell.setCellValue(rowMap.getOrDefault(header, ""));
+                }
+            }
+        } else {
+            System.out.println("No data found for sheet: " + sheetName);
         }
     }
 
-    private void createDifferenceSheet(Workbook workbook, String sheetName, List<Map<String, String>> commonData, List<Map<String, String>> dataAC, List<Map<String, String>> dataBC) {
+    private void createDifferenceSheet(Workbook workbook, String sheetName, List<Map<String, String>> dataBC, List<Map<String, String>> dataAC) {
         Sheet sheet = workbook.createSheet(sheetName);
         int rowNum = 0;
         Row headerRow = sheet.createRow(rowNum++);
         String[] headers = { "issuerNameBC", "issuerNameAC", "curveIdBC", "curveIdAC", "ccyBC", "ccyAC", "runningBC", "runningAC", "unitBC", "unitAC", "curvePathBC", "curvePathAC", "issuerTypeBC", "issuerTypeAC", "tenorBC", "tenorAC", "spreadBC", "spreadAC", "volBC", "volAC", "origSprdBC", "origSprdAC", "feeBC", "feeAC" };
-        for (int i = 0; i < headers.length; i++) {
-            headerRow.createCell(i).setCellValue(headers[i]);
+        int cellNum = 0;
+        for (String header : headers) {
+            headerRow.createCell(cellNum++).setCellValue(header);
         }
 
         for (Map<String, String> bcMap : dataBC) {
+            boolean matchFound = false;
             for (Map<String, String> acMap : dataAC) {
                 if (compareMaps(bcMap, acMap)) {
+                    matchFound = true;
                     Row row = sheet.createRow(rowNum++);
-                    int cellNum = 0;
+                    cellNum = 0;
                     for (String header : headers) {
                         String value = getDifferenceValue(header, bcMap, acMap);
                         Cell cell = row.createCell(cellNum++);
                         cell.setCellValue(value);
                     }
+                    break; // Assuming a one-to-one match, break the loop once a match is found
+                }
+            }
+            if (!matchFound) {
+                Row row = sheet.createRow(rowNum++);
+                cellNum = 0;
+                for (String header : headers) {
+                    String value = getDifferenceValue(header, bcMap, null);
+                    Cell cell = row.createCell(cellNum++);
+                    cell.setCellValue(value);
+                }
+            }
+        }
+
+        for (Map<String, String> acMap : dataAC) {
+            boolean matchFound = false;
+            for (Map<String, String> bcMap : dataBC) {
+                if (compareMaps(bcMap, acMap)) {
+                    matchFound = true;
+                    break;
+                }
+            }
+            if (!matchFound) {
+                Row row = sheet.createRow(rowNum++);
+                cellNum = 0;
+                for (String header : headers) {
+                    String value = getDifferenceValue(header, null, acMap);
+                    Cell cell = row.createCell(cellNum++);
+                    cell.setCellValue(value);
                 }
             }
         }
     }
 
     private boolean compareMaps(Map<String, String> map1, Map<String, String> map2) {
-        return map1.get("curveId").equals(map2.get("curveId")) &&
-                map1.get("tenor").equals(map2.get("tenor"));
+        // Adjust this logic based on the criteria for matching entries
+        return map1.getOrDefault("issuerName", "").equals(map2.getOrDefault("issuerName", "")) &&
+                map1.getOrDefault("curveId", "").equals(map2.getOrDefault("curveId", ""));
     }
 
-    private String getDifferenceValue(String header, Map<String, String> bcMap, Map<String, String> acMap) {
-        String[] parts = header.split("(?<=\\D)(?=\\d)");
-        String key = parts[0].toLowerCase();
-        if (header.endsWith("BC")) {
-            return bcMap.getOrDefault(key, "");
-        } else if (header.endsWith("AC")) {
-            return acMap.getOrDefault(key, "");
-        }
-        return "";
+    private String getDifferenceValue(String header, Map<String, String> mapBC, Map<String, String> mapAC) {
+        String valueBC = (mapBC != null) ? mapBC.getOrDefault(header, "") : "";
+        String valueAC = (mapAC != null) ? mapAC.getOrDefault(header, "") : "";
+        return (valueBC.equals(valueAC) || valueBC.isEmpty() || valueAC.isEmpty()) ? valueBC : valueAC;
     }
 }
